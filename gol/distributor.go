@@ -13,13 +13,33 @@ type distributorChannels struct {
 
 // distributor divides the work between workers and interacts with other goroutines.
 func distributor(p Params, c distributorChannels) {
-	world := c.ioInput
-	for i, i := range {
+	world := make([][]byte, p.ImageHeight)
+	io.Filename<-
+	//Create a 2D slice to store the world OK.
+	//0 That's not enough on its own.
+	//We actually have to get the
+	//image in so we can evolve it with
+	//our game of life algorithm.
+	//Or how do we do that with the IO
+	//goroutine that we've just talked about?
+	//So we need to work out the
+	//file name from the parameters.
+	//So say if we had two 256 by 256 coming in,
+	//we can make out.
+	//We could make a string and send that
+	//down via the appropriate channel.
+	//Yeah,
+	//after we've sent the appropriate command.
+	//We then get that image byte by
+	//byte and store it in this 2D world.
 
+	for i := range c.ioInput {
+		world[i] = make([]byte, p.ImageWidth)
 	}
+	fmt.Println(world)
 	// TODO: Create a 2D slice to store the world.
 	newWorld := make([][]byte, p.ImageHeight)
-	for i := range newWorld {
+	for i := range world {
 		newWorld[i] = make([]byte, p.ImageWidth)
 	}
 
@@ -48,7 +68,6 @@ func distributor(p Params, c distributorChannels) {
 			if y == p.ImageHeight-1 {
 				yDown = 0
 			}
-
 			if world[xBack][y] == 255 { //Horizontal
 				numNeighbours += 1
 			}
@@ -62,39 +81,22 @@ func distributor(p Params, c distributorChannels) {
 			if world[x][yDown] == 255 {
 				numNeighbours += 1
 			}
-
 			if world[xBack][yDown] == 255 { //Diagonal
-
 				numNeighbours += 1
-
 			}
-
 			if world[xForward][yUp] == 255 {
-
 				numNeighbours += 1
-
 			}
-
 			if world[xBack][yUp] == 255 {
-
 				numNeighbours += 1
-
 			}
-
 			if world[xForward][yDown] == 255 {
-
 				numNeighbours += 1
-
 			}
-
 			if numNeighbours == 2 && world[x][y] == 255 || numNeighbours == 3 {
-
 				newWorld[x][y] = 255
-
 			} else {
-
 				newWorld[x][y] = 0
-
 			}
 
 			if p.Turns == 1 {
