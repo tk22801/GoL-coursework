@@ -14,60 +14,24 @@ type distributorChannels struct {
 	ioInput    <-chan uint8
 }
 
-// distributor divides the work between workers and interacts with other goroutines.
-func distributor(p Params, c distributorChannels) {
-	fmt.Println("test")
-	fmt.Println(fmt.Sprintf("%dx%d", p.ImageWidth, p.ImageHeight))
-	filename := fmt.Sprintf("%dx%d", p.ImageWidth, p.ImageHeight)
-	c.ioCommand <- ioInput
-	c.ioFilename <- filename
-	turn := 0
-
-	//Create a 2D slice to store the world OK.
-	//0 That's not enough on its own.
-	//We actually have to get the
-	//image in, so we can evolve it with
-	//our game of life algorithm.
-	//Or how do we do that with the IO
-	//goroutine that we've just talked about?
-	//So we need to work out the
-	//file name from the parameters.
-	//So say if we had two 256 by 256 coming in,
-	//we can make out.
-	//We could make a string and send that
-	//down via the appropriate channel.
-	//Yeah,
-	//after we've sent the appropriate command.
-	//We then get that image byte by
-	//byte and store it in this 2D world.
-
-	world := make([][]byte, p.ImageHeight)
+func makeWorld(height, width int) [][]uint8 {
+	world := make([][]uint8, height)
 	for i := range world {
-		world[i] = make([]byte, p.ImageWidth)
+		world[i] = make([]uint8, width)
 	}
+	return world
+}
 
-	for y := 0; y < p.ImageHeight; y++ {
-		for x := 0; x < p.ImageWidth; x++ {
-			val := <-c.ioInput
-			//if val != 0 {
-			//	fmt.Println(x, y)
-			//}
-			world[y][x] = val
-		}
-	}
-	// : Create a 2D slice to store the world.
+func worker(p Params, out chan<- [][]byte, world [][]byte, workerHeight int, i int) {
+	turn := 0
+	newWorld := make([][]byte, 0)
 	for Turn := 0; Turn < p.Turns; Turn++ {
-
-		newWorld := make([][]byte, p.ImageHeight)
-		for i := range world {
+		newWorld := make([][]byte, workerHeight)
+		for i := range newWorld {
 			newWorld[i] = make([]byte, p.ImageWidth)
 		}
-
-		// : Execute all turns of the Game of Life.
-
 		for x := 0; x < p.ImageWidth; x++ {
-
-			for y := 0; y < p.ImageHeight; y++ {
+			for y := 0; y+(i*p.ImageHeight) < (i+1)*p.ImageHeight; y++ {
 				numNeighbours := 0
 				xBack := x - 1
 				xForward := x + 1
@@ -80,16 +44,18 @@ func distributor(p Params, c distributorChannels) {
 				if x == p.ImageWidth-1 {
 					xForward = 0
 				}
+				// Next Worker
 				if y == 0 {
 					yUp = p.ImageHeight - 1
 				}
 				if y == p.ImageHeight-1 {
 					yDown = 0
 				}
+
+				//Calculations
 				if world[xBack][y] == 255 { //Horizontal
 					numNeighbours += 1
 				}
-				//fmt.Println("Hello 4")
 				if world[xForward][y] == 255 {
 					numNeighbours += 1
 				}
@@ -116,17 +82,59 @@ func distributor(p Params, c distributorChannels) {
 				} else {
 					newWorld[x][y] = 0
 				}
-
-				//if p.Turns == 1 {
-				//fmt.Println(x, y, newWorld[x][y])
-				//}
-
 			}
 		}
 		turn = Turn
-		world = newWorld
 	}
+	out <- newWorld
 	turn += 1
+}
+
+// distributor divides the work between workers and interacts with other goroutines.
+func distributor(p Params, c distributorChannels) {
+	fmt.Println("test")
+	fmt.Println(fmt.Sprintf("%dx%d", p.ImageWidth, p.ImageHeight))
+	filename := fmt.Sprintf("%dx%d", p.ImageWidth, p.ImageHeight)
+	c.ioCommand <- ioInput
+	c.ioFilename <- filename
+	turn := 0
+	world := make([][]byte, p.ImageHeight)
+	for i := range world {
+		world[i] = make([]byte, p.ImageWidth)
+	}
+	for y := 0; y < p.ImageHeight; y++ {
+		for x := 0; x < p.ImageWidth; x++ {
+			val := <-c.ioInput
+			world[y][x] = val
+		}
+	}
+	workerheight := p.ImageHeight / p.Threads
+	//if p.Threads == 1 {
+	//out := make([]chan [][]uint8, p.Threads)
+	//worker(p, out[], world, newWorld, 0)
+	//newWorld = make([][]byte, 0)
+	//for i := 0; i < p.Threads; i++ {
+	//section := <-out[i]
+	//newWorld = append(newWorld, section...)
+	//}
+	topLine := make([]chan [][]byte, p.Threads)
+	bottomLine := make([]chan [][]byte, p.Threads)
+	out := make([]chan [][]byte, p.Threads)
+	for i := range out {
+		out[i] = make(chan [][]byte, p.Threads)
+		topLine[i] = make(chan [][]byte, p.Threads)
+		bottomLine[i] = make(chan [][]byte, p.Threads)
+	}
+
+	for i := 0; i < p.Threads; i++ {
+		go worker(p, out[i], world, workerheight, i)
+	}
+	newWorld := makeWorld(0, 0)
+	for i := 0; i < p.Threads; i++ {
+		section := <-out[i]
+		newWorld = append(newWorld, section...)
+	}
+	world = newWorld
 	// : Report the final state using FinalTurnCompleteEvent.
 	aliveCells := []util.Cell{}
 	for i := 0; i < p.ImageWidth; i++ {
