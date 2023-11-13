@@ -23,9 +23,40 @@ func makeWorld(height, width int) [][]byte {
 }
 
 func worker(p Params, out chan<- [][]byte, world [][]byte, newWorld [][]byte, workerHeight int, i int) {
-	newWorld = makeWorld(workerHeight, p.ImageWidth)
+
+	yStart := i * workerHeight
+	yEnd := (i + 1) * workerHeight
+
+	//Last Section Conditions (Increased Worker Height)
+
+	if i == p.Threads-1 && p.Threads > 1 {
+		yStart = (i) * (p.ImageHeight / p.Threads)
+		yEnd = p.ImageHeight
+	}
+
+	//yLowerBound and yUpperBound (Includes adjacent section's lines)
+
+	yUpperBound := 0
+	yLowerBound := 0
+
+	if yEnd == p.ImageHeight {
+		yUpperBound = 0
+	} else {
+		yUpperBound = yEnd
+	}
+
+	if yStart == 0 {
+		yLowerBound = p.ImageHeight - 1
+	} else {
+		yLowerBound = yStart - 1
+	}
+
+	//println("\nTest:", i, "Lower Bound:", yLowerBound, "Upper Bound:", yUpperBound)
+
+	newWorld = makeWorld(workerHeight+2, p.ImageWidth)
+
 	for x := 0; x < p.ImageWidth; x++ {
-		for y := i * workerHeight; y+(i*workerHeight) < (i+1)*workerHeight; y++ {
+		for y := yStart; y < yEnd; y++ {
 			numNeighbours := 0
 			xBack := x - 1
 			xForward := x + 1
@@ -38,49 +69,60 @@ func worker(p Params, out chan<- [][]byte, world [][]byte, newWorld [][]byte, wo
 			if x == p.ImageWidth-1 {
 				xForward = 0
 			}
+
 			// Next Worker
+
 			if y == 0 {
-				yUp = p.ImageHeight - 1
+				yUp = yLowerBound
 			}
 			if y == p.ImageHeight-1 {
-				yDown = 0
+				yDown = yUpperBound
 			}
 
 			//Calculations
-			if world[xBack][y] == 255 { //Horizontal
+
+			if world[y][xBack] == 255 { //Horizontal
 				numNeighbours += 1
 			}
-			if world[xForward][y] == 255 {
+			if world[y][xForward] == 255 {
 				numNeighbours += 1
 			}
-			if world[x][yUp] == 255 { //Vertical
+			if world[yUp][x] == 255 { //Vertical
 				numNeighbours += 1
 			}
-			if world[x][yDown] == 255 {
+			if world[yDown][x] == 255 {
 				numNeighbours += 1
 			}
-			if world[xBack][yDown] == 255 { //Diagonal
+			if world[yDown][xBack] == 255 { //Diagonal
 				numNeighbours += 1
 			}
-			if world[xForward][yUp] == 255 {
+			if world[yUp][xForward] == 255 {
 				numNeighbours += 1
 			}
-			if world[xBack][yUp] == 255 {
+			if world[yUp][xBack] == 255 {
 				numNeighbours += 1
 			}
-			if world[xForward][yDown] == 255 {
+			if world[yDown][xForward] == 255 {
 				numNeighbours += 1
 			}
-			if numNeighbours == 2 && world[x][y] == 255 || numNeighbours == 3 {
-				newWorld[x][y-(i*workerHeight)] = 255
+
+			if numNeighbours == 2 && world[y][x] == 255 || numNeighbours == 3 {
+				newWorld[y-yStart][x] = 255
 			} else {
-				newWorld[x][y-(i*workerHeight)] = 0
+				newWorld[y-yStart][x] = 0
 			}
-			//changed y values, so it would write in newWorld correctly(which is only workerHeight tall)
-			//fmt.Println(x, y, newWorld[x][y])
 		}
 	}
-	out <- newWorld
+
+	adjustedWorld := makeWorld(workerHeight, p.ImageWidth)
+
+	for y := yStart; y < yEnd; y++ {
+		for x := 0; x < p.ImageWidth; x++ {
+			adjustedWorld[y-yStart][x] = newWorld[y-yStart][x]
+		}
+	}
+
+	out <- adjustedWorld
 }
 
 // distributor divides the work between workers and interacts with other goroutines.
@@ -106,38 +148,44 @@ func distributor(p Params, c distributorChannels) {
 			out := make(chan [][]byte)
 			go worker(p, out, world, newWorld, workerHeight, increment)
 			newWorld = <-out
-			fmt.Println(newWorld)
+			//fmt.Println(newWorld)
 			world = newWorld
 		} else {
 			out := make([]chan [][]byte, p.Threads)
 			for i := range out {
 				out[i] = make(chan [][]byte, p.Threads)
 			}
-			for i := 0; i < p.Threads; i++ {
+			for i := 0; i < p.Threads; i++ { //Makes Workers
 				increment = i
+
+				if increment == p.Threads-1 { // The last Section should include modulus if not directly divisible
+					modulus := p.ImageHeight % p.Threads
+					workerHeight += modulus
+				}
+
 				go worker(p, out[i], world, newWorld, workerHeight, increment)
-				//print("go")
+
 			}
-			finalWorld := makeWorld(0, 0)
+			finalWorld := makeWorld(0, 0) // Rebuilds world from sections
 			for j := 0; j < p.Threads; j++ {
 				section := <-out[j]
 				finalWorld = append(finalWorld, section...)
 			}
+			world = finalWorld
 		}
-		world = newWorld
 		turn = Turn
 	}
 	// : Report the final state using FinalTurnCompleteEvent.
 	aliveCells := []util.Cell{}
-	for i := 0; i < p.ImageWidth; i++ {
-		for j := 0; j < p.ImageHeight; j++ {
+	for i := 0; i < p.ImageHeight; i++ {
+		for j := 0; j < p.ImageWidth; j++ {
 			if world[i][j] == 255 {
 				newCell := []util.Cell{{j, i}}
 				aliveCells = append(aliveCells, newCell...)
 			}
 		}
 	}
-	fmt.Println(aliveCells)
+	//fmt.Println(aliveCells)
 	c.events <- FinalTurnComplete{
 		CompletedTurns: turn, Alive: aliveCells,
 	}
