@@ -2,6 +2,7 @@ package gol
 
 import (
 	"fmt"
+	"time"
 	"uk.ac.bris.cs/gameoflife/util"
 )
 
@@ -125,10 +126,30 @@ func worker(p Params, out chan<- [][]byte, world [][]byte, newWorld [][]byte, wo
 	out <- adjustedWorld
 }
 
+//func ticktock(p Params, c distributorChannels, world [][]byte, Turn int, closeTicker chan<- bool) {
+//	for {
+//		switch {
+//		case <-closeTicker:
+//
+//		}
+//		time.Sleep(500 * time.Millisecond)
+//		AliveCount := 0
+//		for i := 0; i < p.ImageHeight; i++ {
+//			for j := 0; j < p.ImageWidth; j++ {
+//				if world[i][j] == 255 {
+//					AliveCount += 1
+//				}
+//			}
+//		}
+//		c.events <- AliveCellsCount{Turn, AliveCount}
+//	}
+//}
+
 // distributor divides the work between workers and interacts with other goroutines.
 func distributor(p Params, c distributorChannels) {
 	//fmt.Println("test")
 	//fmt.Println(fmt.Sprintf("%dx%d", p.ImageWidth, p.ImageHeight))
+
 	filename := fmt.Sprintf("%dx%d", p.ImageWidth, p.ImageHeight)
 	c.ioCommand <- ioInput
 	c.ioFilename <- filename
@@ -142,6 +163,23 @@ func distributor(p Params, c distributorChannels) {
 			world[y][x] = val
 		}
 	}
+
+	ticker := time.NewTicker(2 * time.Second)
+
+	go func() {
+		for range ticker.C {
+			AliveCount := 0
+			for i := 0; i < p.ImageHeight; i++ {
+				for j := 0; j < p.ImageWidth; j++ {
+					if world[i][j] == 255 {
+						AliveCount += 1
+					}
+				}
+			}
+			c.events <- AliveCellsCount{turn + 1, AliveCount}
+		}
+	}()
+
 	for Turn := 0; Turn < p.Turns; Turn++ {
 		workerHeight := p.ImageHeight / p.Threads
 		if p.Threads == 1 {
@@ -174,7 +212,10 @@ func distributor(p Params, c distributorChannels) {
 			world = finalWorld
 		}
 		turn = Turn
+		c.events <- TurnComplete{Turn}
 	}
+	ticker.Stop()
+
 	// : Report the final state using FinalTurnCompleteEvent.
 	aliveCells := []util.Cell{}
 	for i := 0; i < p.ImageHeight; i++ {
@@ -189,6 +230,15 @@ func distributor(p Params, c distributorChannels) {
 	c.events <- FinalTurnComplete{
 		CompletedTurns: turn, Alive: aliveCells,
 	}
+	c.ioCommand <- ioOutput
+	filename = fmt.Sprintf("%dx%dx%d", p.ImageWidth, p.ImageHeight, turn)
+	c.ioFilename <- filename
+	for i := 0; i < p.ImageHeight; i++ {
+		for j := 0; j < p.ImageWidth; j++ {
+			c.ioOutput <- world[i][j]
+		}
+	}
+	c.events <- ImageOutputComplete{turn, filename}
 
 	// Make sure that the Io has finished any output before exiting.
 	c.ioCommand <- ioCheckIdle
