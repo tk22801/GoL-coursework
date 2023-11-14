@@ -126,29 +126,8 @@ func worker(p Params, out chan<- [][]byte, world [][]byte, newWorld [][]byte, wo
 	out <- adjustedWorld
 }
 
-//func ticktock(p Params, c distributorChannels, world [][]byte, Turn int, closeTicker chan<- bool) {
-//	for {
-//		switch {
-//		case <-closeTicker:
-//
-//		}
-//		time.Sleep(500 * time.Millisecond)
-//		AliveCount := 0
-//		for i := 0; i < p.ImageHeight; i++ {
-//			for j := 0; j < p.ImageWidth; j++ {
-//				if world[i][j] == 255 {
-//					AliveCount += 1
-//				}
-//			}
-//		}
-//		c.events <- AliveCellsCount{Turn, AliveCount}
-//	}
-//}
-
 // distributor divides the work between workers and interacts with other goroutines.
 func distributor(p Params, c distributorChannels) {
-	//fmt.Println("test")
-	//fmt.Println(fmt.Sprintf("%dx%d", p.ImageWidth, p.ImageHeight))
 
 	filename := fmt.Sprintf("%dx%d", p.ImageWidth, p.ImageHeight)
 	c.ioCommand <- ioInput
@@ -163,9 +142,7 @@ func distributor(p Params, c distributorChannels) {
 			world[y][x] = val
 		}
 	}
-
 	ticker := time.NewTicker(2 * time.Second)
-
 	go func() {
 		for range ticker.C {
 			AliveCount := 0
