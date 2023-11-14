@@ -2,6 +2,7 @@ package gol
 
 import (
 	"fmt"
+	"time"
 	"uk.ac.bris.cs/gameoflife/util"
 )
 
@@ -142,7 +143,7 @@ func distributor(p Params, c distributorChannels) {
 			world[y][x] = val
 		}
 	}
-	for Turn := 0; Turn < p.Turns; Turn++ {
+	for Turn := 1; Turn < p.Turns+1; Turn++ {
 		workerHeight := p.ImageHeight / p.Threads
 		if p.Threads == 1 {
 			out := make(chan [][]byte)
@@ -172,8 +173,21 @@ func distributor(p Params, c distributorChannels) {
 				finalWorld = append(finalWorld, section...)
 			}
 			world = finalWorld
+			for {
+				time.Sleep(500 * time.Millisecond)
+				AliveCount := 0
+				for i := 0; i < p.ImageHeight; i++ {
+					for j := 0; j < p.ImageWidth; j++ {
+						if world[i][j] == 255 {
+							AliveCount += 1
+						}
+					}
+				}
+				c.events <- AliveCellsCount{Turn, AliveCount}
+			}
 		}
 		turn = Turn
+		c.events <- TurnComplete{Turn}
 	}
 	// : Report the final state using FinalTurnCompleteEvent.
 	aliveCells := []util.Cell{}
@@ -187,9 +201,10 @@ func distributor(p Params, c distributorChannels) {
 	}
 	//fmt.Println(aliveCells)
 	c.events <- FinalTurnComplete{
-		CompletedTurns: turn, Alive: aliveCells,
-	}
-
+		CompletedTurns: turn, Alive: aliveCells}
+	c.ioCommand <- ioOutput
+	c.ioFilename <- filename
+	c.events <- ImageOutputComplete{turn, filename}
 	// Make sure that the Io has finished any output before exiting.
 	c.ioCommand <- ioCheckIdle
 	<-c.ioIdle
