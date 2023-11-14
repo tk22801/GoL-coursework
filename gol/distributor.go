@@ -23,7 +23,7 @@ func makeWorld(height, width int) [][]byte {
 	return world
 }
 
-func worker(p Params, out chan<- [][]byte, world [][]byte, newWorld [][]byte, workerHeight int, i int) {
+func worker(p Params, c distributorChannels, out chan<- [][]byte, world [][]byte, newWorld [][]byte, workerHeight int, i int, turn int) {
 
 	yStart := i * workerHeight
 	yEnd := (i + 1) * workerHeight
@@ -108,8 +108,14 @@ func worker(p Params, out chan<- [][]byte, world [][]byte, newWorld [][]byte, wo
 			}
 
 			if numNeighbours == 2 && world[y][x] == 255 || numNeighbours == 3 {
+				if world[y][x] == 0 {
+					c.events <- CellFlipped{turn, util.Cell{y, x}}
+				}
 				newWorld[y-yStart][x] = 255
 			} else {
+				if world[y][x] == 255 {
+					c.events <- CellFlipped{turn, util.Cell{y, x}}
+				}
 				newWorld[y-yStart][x] = 0
 			}
 		}
@@ -128,18 +134,25 @@ func worker(p Params, out chan<- [][]byte, world [][]byte, newWorld [][]byte, wo
 
 // distributor divides the work between workers and interacts with other goroutines.
 func distributor(p Params, c distributorChannels) {
-
 	filename := fmt.Sprintf("%dx%d", p.ImageWidth, p.ImageHeight)
 	c.ioCommand <- ioInput
 	c.ioFilename <- filename
+	keyPresses := make(chan int32)
+	//Events := make(chan Event)
+	Run(p, c.events, keyPresses)
+	Pause := "Continue"
 	turn := 0
 	increment := 0
+	aliveCells := []util.Cell{}
 	newWorld := makeWorld(0, 0)
 	world := makeWorld(p.ImageHeight, p.ImageWidth)
-	for y := 0; y < p.ImageHeight; y++ {
-		for x := 0; x < p.ImageWidth; x++ {
+	for x := 0; x < p.ImageHeight; x++ {
+		for y := 0; y < p.ImageWidth; y++ {
 			val := <-c.ioInput
-			world[y][x] = val
+			world[x][y] = val
+			if val == 255 {
+				c.events <- CellFlipped{turn, util.Cell{x, y}}
+			}
 		}
 	}
 	ticker := time.NewTicker(2 * time.Second)
@@ -156,12 +169,54 @@ func distributor(p Params, c distributorChannels) {
 			c.events <- AliveCellsCount{turn + 1, AliveCount}
 		}
 	}()
+	go func() {
+		key := <-keyPresses
+		if key == 's' || key == 'q' {
+			c.ioCommand <- ioOutput
+			filename = fmt.Sprintf("%dx%dx%d", p.ImageWidth, p.ImageHeight, turn)
+			c.ioFilename <- filename
+			for i := 0; i < p.ImageHeight; i++ {
+				for j := 0; j < p.ImageWidth; j++ {
+					c.ioOutput <- world[i][j]
+				}
+			}
+			c.events <- ImageOutputComplete{turn, filename}
+		}
+		if key == 'q' {
+			for i := 0; i < p.ImageHeight; i++ {
+				for j := 0; j < p.ImageWidth; j++ {
+					if world[i][j] == 255 {
+						newCell := []util.Cell{{j, i}}
+						aliveCells = append(aliveCells, newCell...)
+					}
+				}
+			}
+			c.events <- FinalTurnComplete{
+				CompletedTurns: turn, Alive: aliveCells,
+			}
+			c.ioCommand <- ioCheckIdle
+			<-c.ioIdle
+			c.events <- StateChange{turn, Quitting}
+			close(c.events)
+		}
+		if key == 'p' {
+			if Pause == "Continue" {
+				c.events <- StateChange{turn, Executing}
+				Pause = "Pause"
+			} else {
+				if Pause == "Pause" {
+					c.events <- StateChange{turn, Paused}
+					Pause = "Continue"
+				}
+			}
+		}
+	}()
 
 	for Turn := 0; Turn < p.Turns; Turn++ {
 		workerHeight := p.ImageHeight / p.Threads
 		if p.Threads == 1 {
 			out := make(chan [][]byte)
-			go worker(p, out, world, newWorld, workerHeight, increment)
+			go worker(p, c, out, world, newWorld, workerHeight, increment, Turn)
 			newWorld = <-out
 			//fmt.Println(newWorld)
 			world = newWorld
@@ -178,7 +233,7 @@ func distributor(p Params, c distributorChannels) {
 					workerHeight += modulus
 				}
 
-				go worker(p, out[i], world, newWorld, workerHeight, increment)
+				go worker(p, c, out[i], world, newWorld, workerHeight, increment, Turn)
 
 			}
 			finalWorld := makeWorld(0, 0) // Rebuilds world from sections
@@ -194,7 +249,7 @@ func distributor(p Params, c distributorChannels) {
 	ticker.Stop()
 
 	// : Report the final state using FinalTurnCompleteEvent.
-	aliveCells := []util.Cell{}
+	aliveCells = []util.Cell{}
 	for i := 0; i < p.ImageHeight; i++ {
 		for j := 0; j < p.ImageWidth; j++ {
 			if world[i][j] == 255 {
