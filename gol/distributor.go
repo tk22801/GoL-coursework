@@ -24,6 +24,7 @@ func makeWorld(height, width int) [][]byte {
 	return world
 }
 
+// TODO remove newworld
 func worker(p Params, c distributorChannels, out chan<- [][]byte, world [][]byte, newWorld [][]byte, workerHeight int, i int, turn int) {
 
 	yStart := i * workerHeight
